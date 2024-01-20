@@ -3,9 +3,12 @@
 #![feature(panic_info_message)]
 
 use core::arch::global_asm;
+
 mod sbi;
 #[macro_use]
 mod console;
+#[macro_use]
+mod log;
 mod lang_items;
 
 global_asm!(include_str!("entry.asm"));
@@ -13,7 +16,6 @@ global_asm!(include_str!("entry.asm"));
 #[no_mangle]
 pub fn rust_main() -> ! {
     clear_bss();
-    println!("Hello, world!");
     panic!("Deliberate panic");
     unreachable!();
     sbi::shutdown(true);

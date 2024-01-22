@@ -12,7 +12,7 @@ fn panic(info: &PanicInfo) -> ! {
             info.message().unwrap()
         );
     } else {
-        error!("", "core panic: {}", info.message().unwrap());
+        error!("kernel", "core panic: {}", info.message().unwrap());
     }
     shutdown(true);
 }

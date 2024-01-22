@@ -75,27 +75,27 @@ macro_rules! error {
 #[macro_export]
 macro_rules! warn {
     ($num:literal, $str: literal $(, $($arg:tt)+)?) => {
-        $crate::log::warn(crate::log::Level::Warn, $num, format_args!($str $(, $($arg)+)?));
+        $crate::log::log(crate::log::Level::Warn, $num, format_args!($str $(, $($arg)+)?));
     }
 }
 
 #[macro_export]
 macro_rules! info {
     ($num:literal, $str: literal $(, $($arg:tt)+)?) => {
-        $crate::log::info(crate::log::Level::Info, $num, format_args!($str $(, $($arg)+)?));
+        $crate::log::log(crate::log::Level::Info, $num, format_args!($str $(, $($arg)+)?));
     }
 }
 
 #[macro_export]
 macro_rules! debug {
     ($num:literal, $str: literal $(, $($arg:tt)+)?) => {
-        $crate::log::debug(crate::log::Level::Debug, $num, format_args!($str $(, $($arg)+)?));
+        $crate::log::log(crate::log::Level::Debug, $num, format_args!($str $(, $($arg)+)?));
     }
 }
 
 #[macro_export]
 macro_rules! trace {
     ($num:literal, $str: literal $(, $($arg:tt)+)?) => {
-        $crate::log::trace(crate::log::Level::Trace, $num, format_args!($str $(, $($arg)+)?));
+        $crate::log::log(crate::log::Level::Trace, $num, format_args!($str $(, $($arg)+)?));
     }
 }

@@ -1,4 +1,4 @@
-use core::arch::asm;
+//use core::arch::asm;
 
 pub fn console_putchar(c: usize) {
     // let ret: usize;

@@ -1,3 +1,6 @@
+cd ../user
+make build
+cd ../os
 LOG=$1 cargo build --release
 rust-objcopy --strip-all -O binary ./target/riscv64gc-unknown-none-elf/release/os\
                                    ./target/riscv64gc-unknown-none-elf/release/os.bin

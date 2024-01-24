@@ -15,11 +15,12 @@ mod console;
 mod log;
 mod config;
 mod lang_items;
-pub mod loader;
+mod loader;
 mod sbi;
 mod sync;
 pub mod syscall;
-mod task;
+pub mod task;
+mod timer;
 pub mod trap;
 
 global_asm!(include_str!("entry.asm"));
@@ -41,6 +42,8 @@ pub fn rust_main() -> ! {
     );
     trap::init();
     loader::load_app();
+    trap::enable_timer_interrupt();
+    timer::set_next_trigger();
     task::run_first_task();
     panic!("Unreachable in rust_main!");
 }

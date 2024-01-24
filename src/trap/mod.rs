@@ -1,11 +1,14 @@
 mod context;
 
 use crate::syscall::syscall;
+#[allow(unused)]
+use crate::task::{exit_current_and_run_next, suspend_current_and_run_next};
+use crate::timer::set_next_trigger;
 use core::arch::global_asm;
 use riscv::register::{
     mtvec::TrapMode,
-    scause::{self, Exception, Trap},
-    stval, stvec,
+    scause::{self, Exception, Interrupt, Trap},
+    sie, stval, stvec,
 };
 
 global_asm!(include_str!("trap.S"));
@@ -17,6 +20,13 @@ pub fn init() {
     }
     unsafe {
         stvec::write(__alltraps as usize, TrapMode::Direct);
+    }
+}
+
+// timer interrupt enabled
+pub fn enable_timer_interrupt() {
+    unsafe {
+        sie::set_stimer();
     }
 }
 
@@ -42,6 +52,13 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
             cx.sepc += 4; // prepared to call sys_exit
             cx.x[10] = syscall(93, [101, 0, 0]) as usize;
             panic!("");
+        }
+        Trap::Interrupt(Interrupt::SupervisorTimer) => {
+            trace!("kernel #0", "SupervisorTimer Interrupt");
+            // set next timer
+            set_next_trigger();
+            // change to another task
+            suspend_current_and_run_next()
         }
         _ => {
             warn!("kernel #0", "Unexpected exception: {:?}, stval = {:#x}, kernel killed it.", 

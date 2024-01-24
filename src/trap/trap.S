@@ -34,7 +34,6 @@ __restore:
     # case1: restore running app by __restore
     # case2: back to U after handling trap
     # this function will be used to restore the context
-    mv sp, a0               # sp -> kernel stack(after allocated), sscratch -> user stack
                             # restore sstatus/sepc
     ld t0, 32*8(sp)         # read sstatus
     ld t1, 33*8(sp)         # read sepc

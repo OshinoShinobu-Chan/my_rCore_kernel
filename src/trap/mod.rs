@@ -1,6 +1,5 @@
 mod context;
 
-use crate::batch::run_next_app;
 use crate::syscall::syscall;
 use core::arch::global_asm;
 use riscv::register::{
@@ -33,13 +32,22 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
         }
         Trap::Exception(Exception::StoreFault) | Trap::Exception(Exception::StorePageFault) => {
             warn!("kernel #0", "PageFault in application, kernel killed it.");
-            run_next_app();
+            cx.sepc += 4; // prepared to call sys_exit
+            cx.x[10] = syscall(93, [100, 0, 0]) as usize;
+            panic!("");
         }
         Trap::Exception(Exception::IllegalInstruction) => {
-            warn!("kernel #0", "IllegalInstruction in application, kernel killed it.");
-            run_next_app();
+            warn!("kernel #0", "IllegalInstruction in application, bad instruction:{:#x} \
+            kernel killed it.", cx.sepc);
+            cx.sepc += 4; // prepared to call sys_exit
+            cx.x[10] = syscall(93, [101, 0, 0]) as usize;
+            panic!("");
         }
         _ => {
+            warn!("kernel #0", "Unexpected exception: {:?}, stval = {:#x}, kernel killed it.", 
+                    scause.cause(), stval);
+            cx.sepc += 4; // prepared to call sys_exit
+            cx.x[10] = syscall(93, [102, 0, 0]) as usize;
             panic!(
                 "Unexpected exception {:?}, stval = {:#x}!",
                 scause.cause(),

@@ -3,6 +3,12 @@
 #![no_std]
 #![no_main]
 #![feature(panic_info_message)]
+#![feature(alloc_error_handler)]
+
+extern crate alloc;
+
+#[macro_use]
+extern crate bitflags;
 
 use core::arch::global_asm;
 
@@ -16,6 +22,7 @@ mod log;
 mod config;
 mod lang_items;
 mod loader;
+mod mm;
 mod sbi;
 mod sync;
 pub mod syscall;
@@ -40,8 +47,10 @@ pub fn rust_main() -> ! {
         "kernel #0",
         "Note: infomation above are just test for logging system!"
     );
+    mm::init();
+    println!("[kernel] back to world!");
+    mm::remap_test();
     trap::init();
-    loader::load_app();
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
     task::run_first_task();

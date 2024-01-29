@@ -1,3 +1,5 @@
+use crate::trap::trap_return;
+
 
 // Struct for tesk context
 #[derive(Copy, Clone, Debug)]
@@ -20,13 +22,9 @@ impl TaskContext {
             s: [0; 12],
         }
     }
-    // set task context for a new app and set the return address to `__restore`
-    pub fn goto_restore(kstack_ptr: usize) -> Self {
-        extern "C" {
-            fn __restore();
-        }
+    pub fn goto_trap_return(kstack_ptr: usize) -> Self {
         Self {
-            ra: __restore as usize,
+            ra: trap_return as usize,
             sp: kstack_ptr,
             s: [0; 12],
         }

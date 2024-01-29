@@ -6,9 +6,10 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
-use crate::config::MAX_APP_NUM;
-use crate::loader::{get_num_app, init_app_cx};
+use crate::loader::{get_num_app, get_app_data};
 use crate::sync::UPSafeCell;
+use crate::trap::TrapContext;
+use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
 use task::{TaskControlBlock, TaskStatus};
@@ -29,9 +30,32 @@ pub struct TaskManager {
 // Most of the data in task manager are here
 pub struct TaskManagerInner {
     // task list
-    tasks: [TaskControlBlock; MAX_APP_NUM],
+    tasks: Vec<TaskControlBlock>,
     // current task id
     current_task: usize,
+}
+
+lazy_static!{
+    //initialize a global instance of task manager
+    pub static ref TASK_MANAGER: TaskManager = {
+        info!("kernel #0", "init TASK_MANAGER");
+        let num_app = get_num_app();
+        info!("kernel #0", "num_app = {}", num_app);
+        let mut tasks: Vec<TaskControlBlock> = Vec::new();
+        for i in 0..num_app {
+            tasks.push(TaskControlBlock::new(get_app_data(i), i));
+            info!("kernel #0", "Load app_{}", i);
+        }
+        TaskManager {
+            num_app,
+            inner: unsafe {
+                UPSafeCell::new(TaskManagerInner {
+                    tasks,
+                    current_task: 0,
+                })
+            },
+        }
+    };
 }
 
 impl TaskManager {
@@ -78,6 +102,18 @@ impl TaskManager {
             .find(|id| inner.tasks[*id].task_status == TaskStatus::Ready)
     }
 
+    // Get the current `Running` task's token(satp)
+    fn get_current_token(&self) -> usize {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task].get_user_token()
+    }
+
+    // Get the current `Running` task's trap context
+    fn get_current_trap_cx(&self) -> &'static mut TrapContext {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task].get_trap_cx()
+    }
+
     // Switch current `Running` task to the task we have found(chosen)
     // If there's no `Ready` task, exit the kernel with application completed
     fn run_next_task(&self) {
@@ -108,31 +144,6 @@ impl TaskManager {
     }
 }
 
-lazy_static! {
-    // Initializaiton of the global variable `TASK_MANAGER`
-    pub static ref TASK_MANAGER: TaskManager = {
-        let num_app = get_num_app();
-        // all tasks are zero and uninitialized
-        let mut tasks = [TaskControlBlock {
-            task_cx: TaskContext::zero_init(),
-            task_status: TaskStatus::Uninit,
-        }; MAX_APP_NUM];
-        for (i, task) in tasks.iter_mut().enumerate().take(num_app) {
-            // initialize task context and set return address to __restore
-            task.task_cx = TaskContext::goto_restore(init_app_cx(i));
-            // set task status to ready
-            task.task_status = TaskStatus::Ready;
-        }
-        TaskManager {
-            num_app,
-            inner: unsafe{ UPSafeCell::new(TaskManagerInner {
-                tasks,
-                current_task: 0, // let the first task as the current task
-            })},
-        }
-    };
-}
-
 // suspend current task
 fn mark_current_suspended() {
     TASK_MANAGER.mark_current_suspended();
@@ -153,6 +164,16 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+// Get the current `Running` task's token(satp)
+pub fn current_user_token() -> usize {
+    TASK_MANAGER.get_current_token()
+}
+
+// Get the current `Running` task's trap context
+pub fn current_trap_cx() -> &'static mut TrapContext {
+    TASK_MANAGER.get_current_trap_cx()
 }
 
 // run first task

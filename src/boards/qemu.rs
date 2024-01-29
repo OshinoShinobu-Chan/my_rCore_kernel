@@ -9,6 +9,10 @@ const EXIT_RESET: u32 = 0x7777; // qemu reset
 
 pub const CLOCK_FREQ: usize = 12500000;
 
+pub const MMIO: &[(usize, usize)] = &[
+    (0x0010_0000, 0x00_2000),
+];
+
 pub trait QEMUExit {
     /// Exit with specified return code.
     ///

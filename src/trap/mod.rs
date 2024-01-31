@@ -4,7 +4,7 @@ use crate::task::current_user_token;
 use crate::{syscall::syscall, task::current_trap_cx};
 use crate::config::{TRAMPOLINE, TRAP_CONTEXT};
 #[allow(unused)]
-use crate::task::{exit_current_and_run_next, suspend_current_and_run_next};
+use crate::task::{exit_current_and_run_next, suspend_and_run_next};
 use crate::timer::set_next_trigger;
 use core::arch::{global_asm, asm};
 use riscv::register::{
@@ -42,45 +42,51 @@ pub fn enable_timer_interrupt() {
 #[no_mangle]
 pub fn trap_handler() -> ! {
     set_kernel_trap_entry();
-    let cx = current_trap_cx();
     let scause = scause::read(); // get trap cause
     let stval = stval::read(); // get extra value
     match scause.cause() {
         Trap::Exception(Exception::UserEnvCall) => {
+            let mut cx = current_trap_cx();
             trace!("kernel #0", "Kernel get a syscall, id = {}", cx.x[17]);
             cx.sepc += 4; // return to the next instruction
-            cx.x[10] = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12]]) as usize;
+            let result = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12]]) as usize;
+            // cx is changed during sys_exec, so we need to get it again
+            cx = current_trap_cx();
+            cx.x[10] = result as usize;
         }
-        Trap::Exception(Exception::StoreFault) | Trap::Exception(Exception::StorePageFault) => {
-            warn!("kernel #0", "PageFault in application, kernel killed it.");
-            cx.sepc += 4; // prepared to call sys_exit
-            cx.x[10] = syscall(93, [100, 0, 0]) as usize;
-            panic!("");
+        Trap::Exception(Exception::StoreFault) 
+        | Trap::Exception(Exception::StorePageFault)
+        | Trap::Exception(Exception::InstructionFault)
+        | Trap::Exception(Exception::InstructionPageFault)
+        | Trap::Exception(Exception::LoadFault)
+        | Trap::Exception(Exception::LoadPageFault) => {
+            warn!("kernel #0", 
+                "{:?} in application, bad address = {:#x}, bad instruction = {:#x}, kernel killed it.",
+                scause.cause(),
+                stval,
+                current_trap_cx().sepc,    
+            );
+            // page fault exit code is -2
+            exit_current_and_run_next(-2);
         }
         Trap::Exception(Exception::IllegalInstruction) => {
             warn!("kernel #0", "IllegalInstruction in application, bad instruction:{:#x} \
-            kernel killed it.", cx.sepc);
-            cx.sepc += 4; // prepared to call sys_exit
-            cx.x[10] = syscall(93, [101, 0, 0]) as usize;
-            panic!("");
+            kernel killed it.", current_trap_cx().sepc);
+            // illegal instruction exit code is -3
+            exit_current_and_run_next(-3);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             trace!("kernel #0", "SupervisorTimer Interrupt");
             // set next timer
             set_next_trigger();
             // change to another task
-            suspend_current_and_run_next()
+            suspend_and_run_next()
         }
         _ => {
             warn!("kernel #0", "Unexpected exception: {:?}, stval = {:#x}, kernel killed it.", 
                     scause.cause(), stval);
-            cx.sepc += 4; // prepared to call sys_exit
-            cx.x[10] = syscall(93, [102, 0, 0]) as usize;
-            panic!(
-                "Unexpected exception {:?}, stval = {:#x}!",
-                scause.cause(),
-                stval
-            );
+            // unexpected exception exit code is -4
+            exit_current_and_run_next(-4);
         }
     }
     trap_return();

@@ -48,12 +48,15 @@ pub fn rust_main() -> ! {
         "Note: infomation above are just test for logging system!"
     );
     mm::init();
-    println!("[kernel] back to world!");
+    info!("kernel #0", "memory space initialized");
     mm::remap_test();
+    task::add_initproc();
+    info!("kernel #0", "initproc added");
     trap::init();
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
-    task::run_first_task();
+    loader::list_apps();
+    task::run_tasks();
     panic!("Unreachable in rust_main!");
 }
 

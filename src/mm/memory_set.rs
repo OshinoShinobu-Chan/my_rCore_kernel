@@ -88,6 +88,18 @@ impl MemorySet {
             None,
         );
     }
+    // Remove `MapArea` that start with `start_va`
+    pub fn remove_area_with_start_vpn(&mut self, start_vpn: VirtPageNum) {
+        if let Some((idx, area)) = self
+            .areas
+            .iter_mut()
+            .enumerate()
+            .find(|(_, area)| area.vpn_range.get_start() == start_vpn)
+        {
+            area.unmap(&mut self.page_table);
+            self.areas.remove(idx);
+        }
+    }
     // add a page for trampoline which is not contained in any memory area
     fn map_trampoline(&mut self) {
         self.page_table.map(
@@ -102,10 +114,10 @@ impl MemorySet {
         // map trampoline
         memory_set.map_trampoline();
         // map kernel sections
-        info!("kernel #0", ".text [{:#x}, {:#x}", stext as usize, etext as usize);
-        info!("kernel #0", ".rodata [{:#x}, {:#x}", srodata as usize, erodata as usize);
-        info!("kernel #0", ".data [{:#x}, {:#x}", sdata as usize, edata as usize);
-        info!("kernel #0", ".bss [{:#x}, {:#x}", sbss_with_stack as usize, ebss as usize);
+        debug!("kernel #0", ".text [{:#x}, {:#x})", stext as usize, etext as usize);
+        debug!("kernel #0", ".rodata [{:#x}, {:#x})", srodata as usize, erodata as usize);
+        debug!("kernel #0", ".data [{:#x}, {:#x})", sdata as usize, edata as usize);
+        debug!("kernel #0", ".bss [{:#x}, {:#x})", sbss_with_stack as usize, ebss as usize);
         info!("kernel #0", "mapping .text section");
         memory_set.push(
             MapArea::new(
@@ -147,6 +159,7 @@ impl MemorySet {
             None,
         );
         info!("kernel #0", "mapping physical memory");
+        trace!("kernel #0", "start_va = {:#x}, end_va = {:#x}", ekernel as usize, MEMORY_END);
         memory_set.push(
             MapArea::new(
                 (ekernel as usize).into(), 
@@ -246,6 +259,32 @@ impl MemorySet {
             elf.header.pt2.entry_point() as usize,
         )
     }
+    // Clone a same `memory_set`
+    pub fn from_existed_user(user_space: &Self) -> Self {
+        let mut memory_set = Self::new_bare();
+        // map trampoline
+        memory_set.map_trampoline();
+        // copy data sections/trap_context/user_stack by memory areas
+        for area in user_space.areas.iter() {
+            let new_area = MapArea::from_another(area);
+            memory_set.push(new_area, None);
+            // Copy data
+            for vpn in area.vpn_range {
+                let src_ppn = user_space
+                    .translate(vpn)
+                    .unwrap()
+                    .ppn();
+                let dst_ppn = memory_set
+                    .translate(vpn)
+                    .unwrap()
+                    .ppn();
+                dst_ppn
+                    .get_bytes_array()
+                    .copy_from_slice(src_ppn.get_bytes_array());
+            }
+        }
+        memory_set
+    }
     pub fn activate(&self) {
         let satp = self.page_table.token();
         unsafe {
@@ -255,6 +294,10 @@ impl MemorySet {
     }
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.page_table.translate(vpn)
+    }
+    // Remove all memory_set
+    pub fn recycle_data_pages(&mut self) {
+        self.areas.clear();
     }
 }
 
@@ -334,6 +377,14 @@ impl MapArea {
                 break;
             }
             current_vpn.step();
+        }
+    }
+    pub fn from_another(another: &Self) -> Self {
+        Self {
+            vpn_range: VPNRange::new(another.vpn_range.get_start(), another.vpn_range.get_end()),
+            data_frames: BTreeMap::new(),
+            map_type: another.map_type,
+            map_perm: another.map_perm,
         }
     }
 }

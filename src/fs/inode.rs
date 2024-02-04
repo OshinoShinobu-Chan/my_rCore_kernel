@@ -81,7 +81,6 @@ impl File for OSInode {
         let mut total_write_size = 0usize;
         for slice in buf.buffers.iter() {
             trace!("kernel #0", "Write to inode at offset {}, content {:?}", inner.offset, *slice);
-            trace!("kernel #0", "inode info: {:?}", inner.inode.info());
             let write_size = inner.inode.write_at(inner.offset, *slice);
             assert_eq!(write_size, slice.len());
             inner.offset += write_size;

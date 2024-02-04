@@ -20,9 +20,10 @@ mod console;
 #[macro_use]
 mod log;
 mod config;
+mod drivers;
+pub mod fs;
 mod lang_items;
-mod loader;
-mod mm;
+pub mod mm;
 mod sbi;
 mod sync;
 pub mod syscall;
@@ -50,12 +51,12 @@ pub fn rust_main() -> ! {
     mm::init();
     info!("kernel #0", "memory space initialized");
     mm::remap_test();
-    task::add_initproc();
-    info!("kernel #0", "initproc added");
     trap::init();
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
-    loader::list_apps();
+    fs::list_apps();
+    task::add_initproc();
+    info!("kernel #0", "initproc added");
     task::run_tasks();
     panic!("Unreachable in rust_main!");
 }

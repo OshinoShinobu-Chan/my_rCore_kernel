@@ -28,6 +28,7 @@ __alltraps:                 # function used for all trap, this address will be p
     sd t2, 2*8(sp)
     ld t0, 34*8(sp)         # load kernel satp into t0
     ld t1, 36*8(sp)         # load trap_handler into t1
+    ld sp, 35*8(sp)         # move to kernel sp
     csrw satp, t0           # switch to kernel address space
     sfence.vma
     jr t1                   # jump to trap_handler

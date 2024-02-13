@@ -1,13 +1,13 @@
 mod context;
 
-use crate::task::{check_signal_error_of_current, current_add_signal, current_user_token, handle_signals, SignalFlags};
-use crate::{syscall::syscall, task::current_trap_cx};
 use crate::config::{TRAMPOLINE, TRAP_CONTEXT};
-#[allow(unused)]
-use crate::task::{exit_current_and_run_next, suspend_and_run_next};
-#[allow(unused)]
-use crate::timer::{close_timer, set_next_trigger};
-use core::arch::{global_asm, asm};
+use crate::syscall::syscall;
+use crate::task::{
+    check_signal_error_of_current, current_add_signal, current_trap_cx, current_user_token,
+    exit_current_and_run_next, handle_signals, suspend_and_run_next, SignalFlags,
+};
+use crate::timer::set_next_trigger;
+use core::arch::{asm, global_asm};
 use riscv::register::{
     mtvec::TrapMode,
     scause::{self, Exception, Interrupt, Trap},
@@ -16,7 +16,6 @@ use riscv::register::{
 
 global_asm!(include_str!("trap.S"));
 
-// initialize CSR `stvec` as the entry of `__alltraps`
 pub fn init() {
     set_kernel_trap_entry();
 }
@@ -33,7 +32,6 @@ fn set_user_trap_entry() {
     }
 }
 
-// timer interrupt enabled
 pub fn enable_timer_interrupt() {
     unsafe {
         sie::set_stimer();
@@ -43,58 +41,57 @@ pub fn enable_timer_interrupt() {
 #[no_mangle]
 pub fn trap_handler() -> ! {
     set_kernel_trap_entry();
-    let scause = scause::read(); // get trap cause
-    let stval = stval::read(); // get extra value
+    let scause = scause::read();
+    let stval = stval::read();
     match scause.cause() {
         Trap::Exception(Exception::UserEnvCall) => {
+            // jump to next instruction anyway
             let mut cx = current_trap_cx();
-            trace!("kernel #0", "Kernel get a syscall, id = {}", cx.x[17]);
-            cx.sepc += 4; // return to the next instruction
-            let result = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12]]) as usize;
-            // cx is changed during sys_exec, so we need to get it again
+            cx.sepc += 4;
+            // get system call return value
+            let result = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12]]);
+            // cx is changed during sys_exec, so we have to call it again
             cx = current_trap_cx();
             cx.x[10] = result as usize;
         }
-        Trap::Exception(Exception::StoreFault) 
+        Trap::Exception(Exception::StoreFault)
         | Trap::Exception(Exception::StorePageFault)
         | Trap::Exception(Exception::InstructionFault)
         | Trap::Exception(Exception::InstructionPageFault)
         | Trap::Exception(Exception::LoadFault)
         | Trap::Exception(Exception::LoadPageFault) => {
-            warn!("kernel #0", 
-                "{:?} in application, bad address = {:#x}, bad instruction = {:#x}, kernel killed it.",
+            /*
+            println!(
+                "[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, kernel killed it.",
                 scause.cause(),
                 stval,
-                current_trap_cx().sepc,    
+                current_trap_cx().sepc,
             );
+            */
             current_add_signal(SignalFlags::SIGSEGV);
         }
         Trap::Exception(Exception::IllegalInstruction) => {
-            warn!("kernel #0", "IllegalInstruction in application, bad instruction:{:#x} \
-            kernel killed it.", current_trap_cx().sepc);
             current_add_signal(SignalFlags::SIGILL);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
-            trace!("kernel #0", "SupervisorTimer Interrupt");
-            // set next timer
             set_next_trigger();
-            // change to another task
-            suspend_and_run_next()
+            suspend_and_run_next();
         }
         _ => {
-            warn!("kernel #0", "Unexpected exception: {:?}, stval = {:#x}, kernel killed it.", 
-                    scause.cause(), stval);
-            // unexpected exception exit code is -4
-            exit_current_and_run_next(-4);
+            panic!(
+                "Unsupported trap {:?}, stval = {:#x}!",
+                scause.cause(),
+                stval
+            );
         }
     }
-    // handle signals
-    trace!("kernel #0", "handle signals");
+    // handle signals (handle the sent signal)
+    //println!("[K] trap_handler:: handle_signals");
     handle_signals();
 
-    // check error signals (if error the exit)
+    // check error signals (if error then exit)
     if let Some((errno, msg)) = check_signal_error_of_current() {
-        warn!("kernel #0", "Task exit with error: {}", msg);
+        println!("[kernel] {}", msg);
         exit_current_and_run_next(errno);
     }
     trap_return();
@@ -110,7 +107,6 @@ pub fn trap_return() -> ! {
         fn __restore();
     }
     let restore_va = __restore as usize - __alltraps as usize + TRAMPOLINE;
-    //println!("...");
     unsafe {
         asm!(
             "fence.i",
@@ -125,11 +121,9 @@ pub fn trap_return() -> ! {
 
 #[no_mangle]
 pub fn trap_from_kernel() -> ! {
-    let scause = scause::read(); // get trap cause
-    let stval = stval::read(); // get extra value
-    error!("kernel #0", "Trap in kernel: {:?}, stval = {:#x}", scause.cause(), stval);
-    panic!("A trap from kernel!");
-    //trap_return();
+    use riscv::register::sepc;
+    println!("stval = {:#x}, sepc = {:#x}", stval::read(), sepc::read());
+    panic!("a trap {:?} from kernel!", scause::read().cause());
 }
 
 pub use context::TrapContext;

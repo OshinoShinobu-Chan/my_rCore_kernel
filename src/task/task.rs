@@ -1,13 +1,17 @@
 use core::cell::RefMut;
 
+use alloc::string::String;
 use alloc::sync::Weak;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use super::action::SignalActions;
 use super::context::TaskContext;
+use super::signal::SignalFlags;
 use crate::config::TRAP_CONTEXT;
 use crate::fs::{ File, Stdin, Stdout };
+use crate::mm::translated_refmut;
 use crate::mm::{MemorySet, PhysPageNum, KERNEL_SPACE, VirtAddr};
 use crate::sync::UPSafeCell;
 use crate::trap::{TrapContext, trap_handler};
@@ -33,6 +37,17 @@ pub struct TaskControlBlockInner {
     pub children: Vec<Arc<TaskControlBlock>>,
     pub exit_code: i32,
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    pub signals: SignalFlags,
+    pub signal_mask: SignalFlags,
+    /// the signal which is being handling
+    pub handling_sig: isize,
+    /// signal actions table
+    pub signal_actions: SignalActions,
+    /// if the task is killed
+    pub killed: bool,
+    /// if the task is frozen by a signal
+    pub frozen: bool,
+    pub trap_ctx_backup: Option<TrapContext>,
 }
 // Used to represent the status of a task
 #[derive(Copy, Clone, PartialEq)]
@@ -106,6 +121,13 @@ impl TaskControlBlock {
                         // 2 -> stderr
                         Some(Arc::new(Stdout)),
                     ],
+                    signals: SignalFlags::empty(),
+                    signal_mask: SignalFlags::empty(),
+                    handling_sig: -1,
+                    signal_actions: SignalActions::default(),
+                    killed: false,
+                    frozen: false,
+                    trap_ctx_backup: None,
                 })
             },
         };
@@ -120,27 +142,54 @@ impl TaskControlBlock {
         );
         task_control_block
     }
-    pub fn exec(&self, elf_data: &[u8]) {
+    pub fn exec(&self, elf_data: &[u8], args: Vec<String>) {
         // make a memory set using new elf data
-        let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
+        let (memory_set, mut user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
-            .translate(VirtAddr::from(TRAP_CONTEXT).into())
+            .translate(VirtAddr::from(TRAP_CONTEXT).into()) 
             .unwrap()
             .ppn();
-
+        // push arguement to user stack
+        user_sp -= (args.len() + 1) * core::mem::size_of::<usize>();
+        let argv_base = user_sp;
+        // argv stores the address for the address of each args
+        let mut argv: Vec<_> = (0..=args.len())
+            .map(|arg| {
+                translated_refmut(
+                        memory_set.token(),
+                        (argv_base + arg * core::mem::size_of::<usize>()) as *mut usize,
+                )
+            })
+            .collect();
+        // end with 0
+        *argv[args.len()] = 0;
+        for i in 0..args.len() {
+            user_sp -= args[i].len() + 1;
+            *argv[i] = user_sp;
+            let mut p = user_sp;
+            // put the arguement to stack
+            for c in args[i].as_bytes() {
+                *translated_refmut(memory_set.token(), p as *mut u8) = *c;
+                p += 1;
+            }
+            // end with 0
+            *translated_refmut(memory_set.token(), p as *mut u8) = 0;
+        }
+        user_sp -= user_sp % core::mem::size_of::<usize>();
         // access inner 
         let mut inner = self.inner_exclusive_access();
         inner.memory_set = memory_set;
         inner.trap_cx_ppn = trap_cx_ppn;
-        inner.base_size = user_sp;
-        let trap_cx = inner.get_trap_cx();
-        *trap_cx = TrapContext::app_init_context(
+        let mut trap_cx = TrapContext::app_init_context(
             entry_point,
             user_sp,
             KERNEL_SPACE.exclusive_access().token(),
             self.kernel_stack.get_top(),
             trap_handler as usize,
         );
+        trap_cx.x[10] = args.len();
+        trap_cx.x[11] = argv_base;
+        *inner.get_trap_cx() = trap_cx;
         // release inner automatically
     }
     pub fn fork(self: &Arc<Self>) -> Arc<Self> {
@@ -179,6 +228,14 @@ impl TaskControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     fd_table: new_fd_table,
+                    // inherit the signal_mask and signal_action
+                    signal_mask: parent_inner.signal_mask,
+                    signals: SignalFlags::empty(),
+                    handling_sig: -1,
+                    signal_actions: parent_inner.signal_actions.clone(),
+                    killed: false,
+                    frozen: false,
+                    trap_ctx_backup: None,
                 })
             },
         });

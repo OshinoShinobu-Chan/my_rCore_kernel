@@ -2,6 +2,7 @@ use riscv::register::sstatus::{self, Sstatus, SPP};
 
 // Struct to save the context when trap occurs
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct TrapContext {
     // General registers
     pub x: [usize; 32],

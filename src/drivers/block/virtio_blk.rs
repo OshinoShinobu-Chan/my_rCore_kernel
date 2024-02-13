@@ -20,14 +20,14 @@ lazy_static!{
 
 impl BlockDevice for VirtIOBlock {
     fn read_block(&self, block_id: usize, buf: &mut [u8]) {
-        trace!("kernel #0", "read_block at block_id = {}", block_id);
+        //trace!("kernel #0", "read_block at block_id = {}", block_id);
         self.0
             .exclusive_access()
             .read_block(block_id, buf)
             .expect("Error when reading VirtIOBlock");
     }
     fn write_block(&self, block_id: usize, buf: &[u8]) {
-        trace!("kernel #0", "write_block at block_id = {}", block_id);
+        //trace!("kernel #0", "write_block at block_id = {}", block_id);
         self.0
             .exclusive_access()
             .write_block(block_id, buf)

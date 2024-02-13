@@ -10,7 +10,7 @@ pub use frame_allocator::{frame_alloc, frame_dealloc, FrameTracker};
 pub use memory_set::{MapPermission, MemorySet, KERNEL_SPACE, remap_test, kernel_token};
 use     page_table::PTEFlags;
 pub use page_table::{translated_byte_buffer, PageTableEntry, translate_to_str, translated_refmut,
-                    UserBuffer, PageTable};
+                    UserBuffer, PageTable, translate_ref};
 
 pub fn init() {
     heap_allocator::init_heap();

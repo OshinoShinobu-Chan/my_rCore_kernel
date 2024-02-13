@@ -1,11 +1,12 @@
 mod context;
 
-use crate::task::current_user_token;
+use crate::task::{check_signal_error_of_current, current_add_signal, current_user_token, handle_signals, SignalFlags};
 use crate::{syscall::syscall, task::current_trap_cx};
 use crate::config::{TRAMPOLINE, TRAP_CONTEXT};
 #[allow(unused)]
 use crate::task::{exit_current_and_run_next, suspend_and_run_next};
-use crate::timer::set_next_trigger;
+#[allow(unused)]
+use crate::timer::{close_timer, set_next_trigger};
 use core::arch::{global_asm, asm};
 use riscv::register::{
     mtvec::TrapMode,
@@ -66,14 +67,12 @@ pub fn trap_handler() -> ! {
                 stval,
                 current_trap_cx().sepc,    
             );
-            // page fault exit code is -2
-            exit_current_and_run_next(-2);
+            current_add_signal(SignalFlags::SIGSEGV);
         }
         Trap::Exception(Exception::IllegalInstruction) => {
             warn!("kernel #0", "IllegalInstruction in application, bad instruction:{:#x} \
             kernel killed it.", current_trap_cx().sepc);
-            // illegal instruction exit code is -3
-            exit_current_and_run_next(-3);
+            current_add_signal(SignalFlags::SIGILL);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             trace!("kernel #0", "SupervisorTimer Interrupt");
@@ -88,6 +87,15 @@ pub fn trap_handler() -> ! {
             // unexpected exception exit code is -4
             exit_current_and_run_next(-4);
         }
+    }
+    // handle signals
+    trace!("kernel #0", "handle signals");
+    handle_signals();
+
+    // check error signals (if error the exit)
+    if let Some((errno, msg)) = check_signal_error_of_current() {
+        warn!("kernel #0", "Task exit with error: {}", msg);
+        exit_current_and_run_next(errno);
     }
     trap_return();
 }
@@ -117,8 +125,11 @@ pub fn trap_return() -> ! {
 
 #[no_mangle]
 pub fn trap_from_kernel() -> ! {
-    //panic!("A trap from kernel!");
-    trap_return();
+    let scause = scause::read(); // get trap cause
+    let stval = stval::read(); // get extra value
+    error!("kernel #0", "Trap in kernel: {:?}, stval = {:#x}", scause.cause(), stval);
+    panic!("A trap from kernel!");
+    //trap_return();
 }
 
 pub use context::TrapContext;

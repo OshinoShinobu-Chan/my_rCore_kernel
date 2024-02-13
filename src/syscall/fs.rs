@@ -1,7 +1,10 @@
+use alloc::sync::Arc;
+
+use crate::fs::make_pipe;
 // filesystem-related syscalls
 #[allow(deprecated)]
 use crate::fs::{open_file, OpenFlags};
-use crate::mm::{translate_to_str, translated_byte_buffer, UserBuffer};
+use crate::mm::{translate_to_str, translated_byte_buffer, translated_refmut, UserBuffer};
 use crate::task::{current_task, current_user_token};
 
 #[allow(unused)]
@@ -47,11 +50,11 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
         return -1;
     }
     if let Some(file) = &inner.fd_table[fd] {
+        let file = file.clone();
         if !file.readable(){
             debug!("kernel #0", "Sys_read: file not readable");
             return -1;
         }
-        let file = file.clone();
         // release curernt task TCB manually to avoid multi-borrow
         drop(inner);
         file.read(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
@@ -88,4 +91,36 @@ pub fn sys_close(fd: usize) -> isize {
     }
     inner.fd_table[fd].take();
     0
+}
+
+pub fn sys_pipe(pipe: *mut usize) -> isize {
+    trace!("kernel #0", "Sys_pipe is called with pipe = {:?}", pipe);
+    let task = current_task().unwrap();
+    let token = current_user_token();
+    let mut inner = task.inner_exclusive_access();
+    let (pipe_read, pipe_write) = make_pipe();
+    let read_fd = inner.alloc_fd();
+    inner.fd_table[read_fd] = Some(pipe_read);
+    let write_fd = inner.alloc_fd();
+    inner.fd_table[write_fd] = Some(pipe_write);
+    *translated_refmut(token, pipe) = read_fd;
+    *translated_refmut(token, unsafe { pipe.add(1) }) = write_fd;
+    0
+}
+
+pub fn sys_dup(fd: usize) -> isize {
+    trace!("kernel #0", "Sys_dup is called with fd = {}", fd);
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    if fd >= inner.fd_table.len() {
+        debug!("kernel #0", "Sys_dup: fd out of range");
+        return -1;
+    }
+    if inner.fd_table[fd].is_none() {
+        debug!("kernel #0", "Sys_dup: fd not opened");
+        return -1;
+    }
+    let new_fd = inner.alloc_fd();
+    inner.fd_table[new_fd] = Some(Arc::clone(inner.fd_table[fd].as_ref().unwrap()));
+    new_fd as isize
 }
